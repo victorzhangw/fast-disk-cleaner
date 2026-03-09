@@ -183,34 +183,49 @@
             <button class="btn-icon-sm" @click="showSettings = false">✕</button>
           </div>
 
-          <!-- 字型大小 -->
+          <!-- 1. 介面與控制項 -->
           <div class="sp-section">
-            <label class="sp-label">{{ t.fontSize }}: {{ settings.fontSize }}px</label>
+            <label class="sp-label">介面字型與大小</label>
+            <select class="sp-select" v-model="settings.uiFontFamily">
+               <option v-for="opt in FONT_OPTIONS" :value="opt.value" :key="opt.value">{{ opt.label }}</option>
+            </select>
             <input
-              type="range"
-              min="10" max="20" step="1"
-              :value="settings.fontSize"
-              @input="settings.fontSize = Number(($event.target as HTMLInputElement).value)"
+              type="range" min="10" max="20" step="1"
+              :value="settings.uiFontSize"
+              @input="settings.uiFontSize = Number(($event.target as HTMLInputElement).value)"
               class="sp-slider"
             />
-            <div class="sp-slider-marks">
-              <span>10</span><span>13</span><span>16</span><span>20</span>
-            </div>
+            <div class="sp-slider-marks"><span>10</span><span class="amber">{{settings.uiFontSize}}px</span><span>20</span></div>
           </div>
 
-          <!-- 字型選擇 -->
+          <!-- 2. 檔案名稱 -->
           <div class="sp-section">
-            <label class="sp-label">{{ t.fontFamily }}</label>
-            <div class="sp-font-list">
-              <button
-                v-for="opt in FONT_OPTIONS"
-                :key="opt.value"
-                class="sp-font-btn"
-                :class="{ active: settings.fontFamily === opt.value }"
-                :style="{ fontFamily: opt.value }"
-                @click="settings.fontFamily = opt.value"
-              >{{ opt.label }}</button>
-            </div>
+            <label class="sp-label">檔案名稱字型與大小</label>
+            <select class="sp-select" v-model="settings.nameFontFamily">
+               <option v-for="opt in FONT_OPTIONS" :value="opt.value" :key="opt.value">{{ opt.label }}</option>
+            </select>
+            <input
+              type="range" min="10" max="24" step="1"
+              :value="settings.nameFontSize"
+              @input="settings.nameFontSize = Number(($event.target as HTMLInputElement).value)"
+              class="sp-slider"
+            />
+            <div class="sp-slider-marks"><span>10</span><span class="amber">{{settings.nameFontSize}}px</span><span>24</span></div>
+          </div>
+
+          <!-- 3. 副資訊(大小/時間) -->
+          <div class="sp-section">
+            <label class="sp-label">數據資訊字型與大小</label>
+            <select class="sp-select" v-model="settings.monoFontFamily">
+               <option v-for="opt in FONT_OPTIONS" :value="opt.value" :key="opt.value">{{ opt.label }}</option>
+            </select>
+            <input
+              type="range" min="9" max="20" step="1"
+              :value="settings.monoFontSize"
+              @input="settings.monoFontSize = Number(($event.target as HTMLInputElement).value)"
+              class="sp-slider"
+            />
+            <div class="sp-slider-marks"><span>9</span><span class="amber">{{settings.monoFontSize}}px</span><span>20</span></div>
           </div>
 
           <!-- 版本號 -->
@@ -416,6 +431,13 @@ async function handleDeleteBatch(paths: string[]) {
     const results = await invoke<{ path: string; success: boolean; error: string | null }[]>(
       "batch_delete", { paths }
     );
+    
+    // 更新清單：過濾掉成功刪除的項目
+    const succeededPaths = new Set(results.filter((r) => r.success).map((r) => r.path));
+    if (succeededPaths.size > 0) {
+      entries.value = entries.value.filter((e) => !succeededPaths.has(e.path));
+    }
+
     const failed = results.filter((r) => !r.success);
     if (failed.length > 0) {
       // 顯示第一個失敗的具體原因

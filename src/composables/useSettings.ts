@@ -11,8 +11,12 @@ export type FontFamily =
     | "system-ui";
 
 export interface AppSettings {
-    fontSize: number;      // 10–20 px
-    fontFamily: FontFamily;
+    uiFontSize: number;
+    uiFontFamily: FontFamily;
+    nameFontSize: number;
+    nameFontFamily: FontFamily;
+    monoFontSize: number;
+    monoFontFamily: FontFamily;
 }
 
 const STORAGE_KEY = "fdc-settings";
@@ -46,7 +50,11 @@ function ensureGFonts() {
 // ── 讀取 / 預設 ───────────────────────────────────────────────────────────────
 
 function defaults(): AppSettings {
-    return { fontSize: 13, fontFamily: "IBM Plex Sans" };
+    return {
+        uiFontSize: 13, uiFontFamily: "IBM Plex Sans",
+        nameFontSize: 13, nameFontFamily: "IBM Plex Sans",
+        monoFontSize: 12, monoFontFamily: "IBM Plex Mono",
+    };
 }
 
 function load(): AppSettings {
@@ -54,6 +62,14 @@ function load(): AppSettings {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
             const parsed = JSON.parse(raw);
+            // 遷移舊的單一設定
+            if ('fontSize' in parsed && !('uiFontSize' in parsed)) {
+                return {
+                    uiFontSize: parsed.fontSize, uiFontFamily: parsed.fontFamily || "IBM Plex Sans",
+                    nameFontSize: parsed.fontSize, nameFontFamily: parsed.fontFamily || "IBM Plex Sans",
+                    monoFontSize: Math.max(10, parsed.fontSize - 1), monoFontFamily: "IBM Plex Mono",
+                };
+            }
             return { ...defaults(), ...parsed };
         }
     } catch { }
@@ -64,12 +80,19 @@ function load(): AppSettings {
 
 function applySettings(s: AppSettings) {
     const html = document.documentElement;
-    // 直接設在 html element 的 style，優先級最高
-    html.style.setProperty("--app-font-size", `${s.fontSize}px`);
-    html.style.setProperty("--app-font-family", `"${s.fontFamily}", system-ui, sans-serif`);
-    // 同時直接設 fontSize / fontFamily（確保覆蓋）
-    html.style.fontSize = `${s.fontSize}px`;
-    html.style.fontFamily = `"${s.fontFamily}", system-ui, sans-serif`;
+    // UI (全域預設)
+    html.style.setProperty("--app-font-size", `${s.uiFontSize}px`);
+    html.style.setProperty("--app-font-family", `"${s.uiFontFamily}", system-ui, sans-serif`);
+    html.style.fontSize = `${s.uiFontSize}px`;
+    html.style.fontFamily = `"${s.uiFontFamily}", system-ui, sans-serif`;
+
+    // 檔案名稱
+    html.style.setProperty("--name-font-size", `${s.nameFontSize}px`);
+    html.style.setProperty("--name-font-family", `"${s.nameFontFamily}", system-ui, sans-serif`);
+
+    // 數據 (檔案大小 / 數量 / 日期)
+    html.style.setProperty("--mono-font-size", `${s.monoFontSize}px`);
+    html.style.setProperty("--mono-font-family", `"${s.monoFontFamily}", monospace`);
 }
 
 // ── 全域單例 ──────────────────────────────────────────────────────────────────

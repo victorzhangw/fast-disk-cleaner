@@ -2,20 +2,35 @@
   <div class="file-list">
     <!-- ── 欄位標頭（可點擊排序）────────────────────────────────────────── -->
     <div class="fl-header">
+      <!-- 全選 checkbox -->
+      <div class="col-check" @click.stop>
+        <input
+          type="checkbox"
+          class="row-checkbox"
+          :checked="isAllSelected"
+          :indeterminate="isIndeterminate"
+          @change="toggleAll"
+          title="全選 / 取消全選"
+        />
+      </div>
       <div class="col-icon" />
-      <div class="col-name sort-col" @click="setSort('name')">
+      <!-- 名稱欄（靠左） -->
+      <div class="col-name sort-col sort-col-left" @click="setSort('name')">
         {{ props.i18n?.name ?? 'Name' }}
         <span class="sort-arrow">{{ sortArrow('name') }}</span>
       </div>
-      <div class="col-size sort-col" @click="setSort('size')">
-        {{ props.i18n?.size ?? 'Size' }}
+      <!-- 大小欄（置中） -->
+      <div class="col-size sort-col sort-col-center" @click="setSort('size')">
         <span class="sort-arrow">{{ sortArrow('size') }}</span>
+        {{ props.i18n?.size ?? 'Size' }}
       </div>
-      <div class="col-files sort-col" @click="setSort('files')">
-        {{ props.i18n?.files ?? 'Files' }}
+      <!-- 檔案數欄（置中） -->
+      <div class="col-files sort-col sort-col-center" @click="setSort('files')">
         <span class="sort-arrow">{{ sortArrow('files') }}</span>
+        {{ props.i18n?.files ?? 'Files' }}
       </div>
-      <div class="col-modified sort-col" @click="setSort('modified')">
+      <!-- 修改時間欄（靠左） -->
+      <div class="col-modified sort-col sort-col-left" @click="setSort('modified')">
         {{ props.i18n?.modified ?? 'Modified' }}
         <span class="sort-arrow">{{ sortArrow('modified') }}</span>
       </div>
@@ -26,6 +41,7 @@
     <!-- Loading skeleton -->
     <template v-if="isLoading">
       <div class="fl-row skeleton-row" v-for="i in 12" :key="i">
+        <div class="col-check"><span class="skeleton" style="width:14px;height:14px;border-radius:3px" /></div>
         <div class="col-icon"><span class="skeleton icon-skel" /></div>
         <div class="col-name"><span class="skeleton" :style="`width:${60 + i * 7}px;height:12px`" /></div>
         <div class="col-size"><span class="skeleton" style="width:52px;height:12px" /></div>
@@ -48,9 +64,18 @@
         :key="entry.path"
         class="fl-row"
         :class="{ selected: selected.has(entry.path) }"
-        @click="toggleSelect(entry)"
         @dblclick="entry.is_dir && $emit('navigate', entry.path)"
       >
+        <!-- Checkbox -->
+        <div class="col-check" @click.stop>
+          <input
+            type="checkbox"
+            class="row-checkbox"
+            :checked="selected.has(entry.path)"
+            @change="toggleSelect(entry)"
+          />
+        </div>
+
         <div class="col-icon">
           <span class="icon">{{ entry.is_dir ? "📁" : fileIcon(entry.name) }}</span>
         </div>
@@ -132,7 +157,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import type { FileEntry } from "../composables/useScanner";
 import { formatBytes, formatDate } from "../composables/useScanner";
 
@@ -175,17 +200,27 @@ function sortArrow(key: SortKey): string {
 }
 
 const sortedEntries = computed(() => {
-  const arr = [...props.entries];
   const dir = sortDir.value === "asc" ? 1 : -1;
 
+  // 「名稱」排序：資料夾群組內排序 + 檔案群組內排序，不混合
+  if (sortKey.value === "name") {
+    const dirs  = props.entries.filter(e => e.is_dir);
+    const files = props.entries.filter(e => !e.is_dir);
+    const cmp = (a: FileEntry, b: FileEntry) =>
+      dir * a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+    return [...dirs.sort(cmp), ...files.sort(cmp)];
+  }
+
+  const arr = [...props.entries];
   return arr.sort((a, b) => {
     switch (sortKey.value) {
-      case "name":
-        return dir * a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
       case "size":
-        // computing 的目錄排最後
+        // 計算中的目錄排在最後
         if (a.is_computing && !b.is_computing) return 1;
         if (!a.is_computing && b.is_computing) return -1;
+        // 大小排序也保持「目錄優先」規則（同大小時目錄在前）
+        if (a.is_dir !== b.is_dir && a.size === b.size)
+          return a.is_dir ? -1 : 1;
         return dir * (a.size - b.size);
       case "files":
         return dir * (a.file_count - b.file_count);
@@ -204,13 +239,43 @@ const sortedEntries = computed(() => {
 
 const selected = ref(new Set<string>());
 
+// 自動清理已不存在的項目
+watch(() => props.entries, (newEntries) => {
+  const currentPaths = new Set(newEntries.map(e => e.path));
+  const nextSelected = new Set<string>();
+  for (const p of selected.value) {
+    if (currentPaths.has(p)) nextSelected.add(p);
+  }
+  if (nextSelected.size !== selected.value.size) {
+    selected.value = nextSelected;
+  }
+});
+
+/** Toggle single item selection */
 function toggleSelect(entry: FileEntry) {
-  if (selected.value.has(entry.path)) {
-    selected.value.delete(entry.path);
+  const s = new Set(selected.value);
+  if (s.has(entry.path)) s.delete(entry.path);
+  else s.add(entry.path);
+  selected.value = s;
+}
+
+/** Select / Deselect all */
+function toggleAll() {
+  if (isAllSelected.value) {
+    selected.value = new Set();
   } else {
-    selected.value.add(entry.path);
+    selected.value = new Set(sortedEntries.value.map(e => e.path));
   }
 }
+
+const isAllSelected = computed(() =>
+  sortedEntries.value.length > 0 &&
+  sortedEntries.value.every(e => selected.value.has(e.path))
+);
+
+const isIndeterminate = computed(() =>
+  selected.value.size > 0 && !isAllSelected.value
+);
 
 const selectedSize = computed(() =>
   props.entries
@@ -297,15 +362,6 @@ function fileIcon(name: string): string {
   user-select: none;
 }
 
-.sort-col {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  transition: color 0.1s;
-}
-.sort-col:hover { color: var(--text-1); }
-.sort-arrow { font-size: 10px; opacity: 0.7; }
 
 /* ── Row ────────────────────────────────────────────────────────────────── */
 .fl-row {
@@ -321,29 +377,61 @@ function fileIcon(name: string): string {
 .fl-row:hover { background: var(--row-hover); }
 .fl-row.selected { background: var(--row-selected); }
 
-/* grid column sizing */
+/* grid column sizing
+   check | icon | name | size | files | modified | bar | actions */
 .fl-header, .fl-row {
-  --col-widths: 28px 1fr 90px 70px 140px 120px 72px;
+  --col-widths: 36px 28px minmax(120px, 0.6fr) 96px 80px 168px 100px 68px;
 }
 
-.col-icon   { font-size: 14px; }
-.col-name   { overflow: hidden; padding-right: 8px; }
-.col-size   { text-align: right; font-size: 12px; }
-.col-files  { text-align: right; font-size: 11px; }
-.col-modified { font-size: 11px; }
-.col-bar    { padding: 0 8px; }
-.col-actions {
+/* 欄位預設就是靠左，要靠右的另指定 */
+.col-check    { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.col-icon     { font-size: var(--name-font-size, 14px); overflow: hidden; }
+.col-name     { overflow: hidden; padding-right: 6px; min-width: 0; }
+.col-size     { text-align: center; font-family: var(--mono-font-family); font-size: var(--mono-font-size); overflow: hidden; min-width: 0; }
+.col-files    { text-align: center; font-family: var(--mono-font-family); font-size: calc(var(--mono-font-size) - 1px); overflow: hidden; min-width: 0; white-space: nowrap; }
+.col-modified { font-family: var(--mono-font-family); font-size: calc(var(--mono-font-size) - 1px); overflow: hidden; min-width: 0; white-space: nowrap; padding-left: 6px; }
+.col-bar      { padding: 0 6px; overflow: hidden; min-width: 0; }
+.col-actions  {
   display: flex;
   gap: 4px;
   justify-content: flex-end;
   opacity: 0;
   transition: opacity 0.1s;
+  overflow: hidden;
 }
 .fl-row:hover .col-actions { opacity: 1; }
 
+/* Checkbox 樣式 */
+.row-checkbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--amber);
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+
+/* 欄位標頭排列方式
+   sort-col-left  : 靠左（名稱、修改時間）
+   sort-col-right : 靠右（大小、檔案數）——和資料欄相同 */
+.sort-col {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 0.1s;
+  user-select: none;
+  gap: 2px;
+}
+.sort-col-left   { justify-content: flex-start; }
+.sort-col-center { justify-content: center; }      /* 置中（大小、檔案數） */
+.sort-col-right  { justify-content: flex-end; }
+.sort-col:hover { color: var(--text-1); }
+.sort-arrow { font-size: 10px; opacity: 0.6; flex-shrink: 0; }
+
 /* ── Entry name ────────────────────────────────────────────────────────── */
 .entry-name {
-  font-size: 13px;
+  font-family: var(--name-font-family);
+  font-size: var(--name-font-size);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
