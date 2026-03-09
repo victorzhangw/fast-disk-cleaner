@@ -68,14 +68,18 @@ pub fn ultra_delete(path: &str) -> Result<(), std::io::Error> {
 
 /// 刪除單一路徑（自動判斷檔案或目錄）。
 pub fn delete_file(path: &str) -> Result<(), std::io::Error> {
-    ultra_delete(path)
+    let res = ultra_delete(path);
+    if res.is_ok() {
+        crate::scanner::clear_dir_size_cache();
+    }
+    res
 }
 
 // ── Batch delete ──────────────────────────────────────────────────────────────
 
 /// 並行刪除多個路徑，回傳每個路徑的成功/失敗結果（含詳細錯誤訊息）。
 pub fn batch_delete(paths: Vec<String>) -> Vec<DeleteResult> {
-    paths
+    let results: Vec<DeleteResult> = paths
         .par_iter()
         .map(|path| match ultra_delete(path) {
             Ok(_) => DeleteResult {
@@ -89,7 +93,10 @@ pub fn batch_delete(paths: Vec<String>) -> Vec<DeleteResult> {
                 error: Some(format!("{}: {}", path, e)),
             },
         })
-        .collect()
+        .collect();
+        
+    crate::scanner::clear_dir_size_cache();
+    results
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

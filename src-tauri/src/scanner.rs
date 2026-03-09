@@ -1,12 +1,38 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use chrono::{DateTime, Utc};
+use dashmap::DashMap;
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
 use crate::models::FileEntry;
+
+// ── 全域快取與 IO 線程池 ───────────────────────────────────────────────────────
+
+static DIR_SIZE_CACHE: OnceLock<DashMap<String, (u64, u64)>> = OnceLock::new();
+
+pub fn get_dir_size_cache() -> &'static DashMap<String, (u64, u64)> {
+    DIR_SIZE_CACHE.get_or_init(|| DashMap::new())
+}
+
+/// 清除全域目錄大小快取（在發生刪除或移動操作時呼叫）
+pub fn clear_dir_size_cache() {
+    get_dir_size_cache().clear();
+}
+
+/// 全域 IO 線程池（限制並行數，避免 HDD 讀寫頭亂跳，提升整體吞吐）
+fn io_pool() -> &'static rayon::ThreadPool {
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(4) // 限制並行掃描數量，SSD/HDD 都適用的折衷值
+            .build()
+            .unwrap()
+    })
+}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -58,15 +84,17 @@ pub fn compute_dir_sizes_with_progress(
         .filter(|e| e.metadata().map(|m| m.is_dir()).unwrap_or(false))
         .collect();
 
-    // 並行計算各目錄大小，最多 6 個執行緒（避免 HDD IO 飽和）
-    dirs.par_iter().for_each(|entry| {
-        if cancel.load(Ordering::Relaxed) {
-            return;
-        }
-        let entry_path = entry.path();
-        let path_str = entry_path.display().to_string();
-        let (size, file_count) = compute_dir_stats(&entry_path);
-        on_update(path_str, size, file_count);
+    // 並行計算各目錄大小，使用自訂執行緒池限制資源
+    io_pool().install(|| {
+        dirs.par_iter().for_each(|entry| {
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            let entry_path = entry.path();
+            let path_str = entry_path.display().to_string();
+            let (size, file_count) = compute_dir_stats(&entry_path);
+            on_update(path_str, size, file_count);
+        });
     });
 }
 
@@ -155,9 +183,17 @@ pub fn scan_deep_with_progress(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// 遞迴計算目錄的（總位元組, 總檔案數）。
+/// 遞迴計算目錄的（總位元組, 總檔案數），結合 DashMap 記憶化
 fn compute_dir_stats(dir: &Path) -> (u64, u64) {
-    WalkDir::new(dir)
+    let path_str = dir.display().to_string();
+    let cache = get_dir_size_cache();
+
+    // 如果快取中已有紀錄，直接回傳（秒開）
+    if let Some(cached) = cache.get(&path_str) {
+        return *cached;
+    }
+
+    let stats = WalkDir::new(dir)
         .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -165,7 +201,11 @@ fn compute_dir_stats(dir: &Path) -> (u64, u64) {
         .filter(|m| m.is_file())
         .fold((0u64, 0u64), |(bytes, count), m| {
             (bytes + m.len(), count + 1)
-        })
+        });
+
+    // 存入快取
+    cache.insert(path_str, stats);
+    stats
 }
 
 fn system_time_to_rfc3339(t: Option<std::time::SystemTime>) -> Option<String> {

@@ -65,6 +65,9 @@ pub fn move_to_trash(path: &str) -> Result<TrashEntry, std::io::Error> {
     // Move item (atomic on same filesystem)
     fs::rename(src, &dest)?;
 
+    // 移入垃圾桶後清除大小快取，迫使重新計算
+    crate::scanner::clear_dir_size_cache();
+
     // Write metadata sidecar
     let meta = TrashMeta {
         original_path: path.to_string(),
@@ -151,6 +154,9 @@ pub fn restore_from_trash(trash_id: &str) -> Result<String, std::io::Error> {
 
     fs::rename(&item_path, dest)?;
     fs::remove_file(&meta_path)?;
+
+    // 還原後清除大小快取，迫使重新計算
+    crate::scanner::clear_dir_size_cache();
 
     Ok(meta.original_path)
 }
