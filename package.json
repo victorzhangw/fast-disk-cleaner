@@ -1,0 +1,23 @@
+{
+  "name": "fast-disk-cleaner",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.0.0",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-vue": "^5.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0",
+    "vue-tsc": "^2.0.0"
+  }
+}
