@@ -109,21 +109,52 @@ export function useScanner() {
 
       isComputingSizes.value = true;
 
-      // 監聽每個目錄大小更新
+      // 建立 debounce 佇列與 rAF 機制以避免高頻更新癱瘓畫面
+      let pendingSizeUpdates = new Map<string, { size: number, count: number }>();
+      let sizeAnimationFrame: number | null = null;
+
       unlistenSizeUpdate = await listen<{ path: string; size: number; file_count: number }>(
         "size-update",
         ({ payload }) => {
-          const entry = entries.value.find(e => e.path === payload.path);
-          if (entry) {
-            entry.size = payload.size;
-            entry.file_count = payload.file_count;
-            entry.is_computing = false;
+          // 先存入佇列
+          pendingSizeUpdates.set(payload.path, { size: payload.size, count: payload.file_count });
+
+          // 透過 rAF 批次處理
+          if (sizeAnimationFrame === null) {
+            sizeAnimationFrame = requestAnimationFrame(() => {
+              // 遍歷所有收到的大小的更新並一次性套用到 entries (Vue proxy object)
+              pendingSizeUpdates.forEach(({ size, count }, path) => {
+                const entry = entries.value.find(e => e.path === path);
+                if (entry) {
+                  entry.size = size;
+                  entry.file_count = count;
+                  entry.is_computing = false;
+                }
+              });
+              // 清空佇列並釋放 frame id
+              pendingSizeUpdates.clear();
+              sizeAnimationFrame = null;
+            });
           }
         }
       );
 
       // 監聽全部完成
       unlistenSizesComplete = await listen("sizes-complete", () => {
+        if (sizeAnimationFrame !== null) {
+          cancelAnimationFrame(sizeAnimationFrame);
+          pendingSizeUpdates.forEach(({ size, count }, path) => {
+            const entry = entries.value.find(e => e.path === path);
+            if (entry) {
+              entry.size = size;
+              entry.file_count = count;
+              entry.is_computing = false;
+            }
+          });
+          pendingSizeUpdates.clear();
+          sizeAnimationFrame = null;
+        }
+
         isComputingSizes.value = false;
         // 計算完成後依大小重新排序
         entries.value = [...entries.value].sort((a, b) => b.size - a.size);
@@ -178,16 +209,36 @@ export function useScanner() {
     unlistenChunk?.();
     unlistenComplete?.();
 
+    let pendingEntries: FileEntry[] = [];
+    let pendingProcessed = 0;
+    let frameId: number | null = null;
+
     unlistenChunk = await listen<{ entries: FileEntry[]; processed: number }>(
       "scan-chunk",
       ({ payload }) => {
-        deepEntries.value.push(...payload.entries);
-        deepProcessed.value = payload.processed;
+        pendingEntries.push(...payload.entries);
+        pendingProcessed = payload.processed;
+
+        if (frameId === null) {
+          frameId = requestAnimationFrame(() => {
+            deepEntries.value.push(...pendingEntries);
+            deepProcessed.value = pendingProcessed;
+            pendingEntries = [];
+            frameId = null;
+          });
+        }
       }
     );
 
     unlistenComplete = await listen("scan-complete", () => {
       isDeepScanning.value = false;
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+        deepEntries.value.push(...pendingEntries);
+        deepProcessed.value = pendingProcessed;
+        pendingEntries = [];
+        frameId = null;
+      }
     });
 
     try {

@@ -177,63 +177,12 @@
 
       <!-- ── 設定面板（右側滑出） ─────────────────────────────────────────── -->
       <Transition name="slide-right">
-        <aside class="settings-panel" v-if="showSettings">
-          <div class="sp-header">
-            <span class="sp-title">{{ t.settingsTitle }}</span>
-            <button class="btn-icon-sm" @click="showSettings = false">✕</button>
-          </div>
-
-          <!-- 1. 介面與控制項 -->
-          <div class="sp-section">
-            <label class="sp-label">介面字型與大小</label>
-            <select class="sp-select" v-model="settings.uiFontFamily">
-               <option v-for="opt in FONT_OPTIONS" :value="opt.value" :key="opt.value">{{ opt.label }}</option>
-            </select>
-            <input
-              type="range" min="10" max="20" step="1"
-              :value="settings.uiFontSize"
-              @input="settings.uiFontSize = Number(($event.target as HTMLInputElement).value)"
-              class="sp-slider"
-            />
-            <div class="sp-slider-marks"><span>10</span><span class="amber">{{settings.uiFontSize}}px</span><span>20</span></div>
-          </div>
-
-          <!-- 2. 檔案名稱 -->
-          <div class="sp-section">
-            <label class="sp-label">檔案名稱字型與大小</label>
-            <select class="sp-select" v-model="settings.nameFontFamily">
-               <option v-for="opt in FONT_OPTIONS" :value="opt.value" :key="opt.value">{{ opt.label }}</option>
-            </select>
-            <input
-              type="range" min="10" max="24" step="1"
-              :value="settings.nameFontSize"
-              @input="settings.nameFontSize = Number(($event.target as HTMLInputElement).value)"
-              class="sp-slider"
-            />
-            <div class="sp-slider-marks"><span>10</span><span class="amber">{{settings.nameFontSize}}px</span><span>24</span></div>
-          </div>
-
-          <!-- 3. 副資訊(大小/時間) -->
-          <div class="sp-section">
-            <label class="sp-label">數據資訊字型與大小</label>
-            <select class="sp-select" v-model="settings.monoFontFamily">
-               <option v-for="opt in FONT_OPTIONS" :value="opt.value" :key="opt.value">{{ opt.label }}</option>
-            </select>
-            <input
-              type="range" min="9" max="20" step="1"
-              :value="settings.monoFontSize"
-              @input="settings.monoFontSize = Number(($event.target as HTMLInputElement).value)"
-              class="sp-slider"
-            />
-            <div class="sp-slider-marks"><span>9</span><span class="amber">{{settings.monoFontSize}}px</span><span>20</span></div>
-          </div>
-
-          <!-- 版本號 -->
-          <div class="sp-version">
-            <span class="dim">{{ t.version }}</span>
-            <span class="mono amber">v{{ appVersion }}</span>
-          </div>
-        </aside>
+        <SettingsPanel
+          v-if="showSettings"
+          :i18n="t"
+          :app-version="appVersion"
+          @close="showSettings = false"
+        />
       </Transition>
     </div>
 
@@ -248,18 +197,7 @@
     </footer>
 
     <!-- ── 全域錯誤 Toast ──────────────────────────────────────────────────── -->
-    <Transition name="fade">
-      <div class="error-toast" v-if="error">
-        <div class="error-content">
-          <span class="red">⚠</span>
-          <span class="error-msg" style="user-select:text">{{ error }}</span>
-        </div>
-        <div class="error-actions">
-          <button class="btn-icon-sm" title="複製錯誤訊息" @click="copyError">📋</button>
-          <button class="btn-icon-sm" @click="error = null">✕</button>
-        </div>
-      </div>
-    </Transition>
+    <ErrorToast :error="error" @clear="error = null" />
 
   </div>
 </template>
@@ -271,11 +209,12 @@ import { invoke } from "@tauri-apps/api/core";
 import DiskUsage    from "./components/DiskUsage.vue";
 import FileList     from "./components/FileList.vue";
 import TrashManager from "./components/TrashManager.vue";
+import SettingsPanel from "./components/SettingsPanel.vue";
+import ErrorToast   from "./components/ErrorToast.vue";
 
 import { useScanner, formatBytes } from "./composables/useScanner";
 import { useTheme }    from "./composables/useTheme";
 import { useI18n }     from "./composables/useI18n";
-import { useSettings } from "./composables/useSettings";
 
 // ── Tauri 錯誤解析 helper ────────────────────────────────────────
 // Tauri invoke 失敗時，e 可能是 string 或 { message, code } 等不同格式
@@ -296,7 +235,6 @@ function parseInvokeError(e: unknown): string {
 
 const { theme, toggleTheme } = useTheme();
 const { t, toggleLocale }    = useI18n();
-const { settings, FONT_OPTIONS } = useSettings();
 
 // ── 掃描器 ────────────────────────────────────────────────────────────────────
 
@@ -449,12 +387,6 @@ async function handleDeleteBatch(paths: string[]) {
   } catch (e) {
     error.value = `刪除命令失敗：${parseInvokeError(e)}`;
   }
-}
-
-// ── 複製錯誤 ──────────────────────────────────────────────────────────────────
-
-function copyError() {
-  if (error.value) navigator.clipboard.writeText(error.value).catch(() => {});
 }
 
 // ── 麵包屑標籤 ───────────────────────────────────────────────────────────────
@@ -659,66 +591,7 @@ function crumbLabel(crumb: string, idx: number): string {
 
 .scan-big-btn { padding: 10px 32px; font-size: 15px; margin-top: 4px; }
 
-/* ── 設定面板 ────────────────────────────────────────────────────────────── */
-.settings-panel {
-  width: 280px;
-  flex-shrink: 0;
-  background: var(--bg-1);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-.sp-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.sp-title { font-size: 13px; font-weight: 600; color: var(--text-1); }
-
-.sp-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.sp-label { display: block; font-size: 11px; color: var(--text-2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .05em; }
-
-.sp-slider {
-  width: 100%;
-  accent-color: var(--amber);
-  height: 4px;
-  cursor: pointer;
-}
-.sp-slider-marks {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: var(--text-3);
-  margin-top: 4px;
-  font-family: var(--font-mono);
-}
-
-.sp-font-list { display: flex; flex-direction: column; gap: 4px; }
-.sp-font-btn {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-2);
-  text-align: left;
-  padding: 7px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.12s;
-}
-.sp-font-btn:hover { border-color: var(--border-hi); color: var(--text-1); }
-.sp-font-btn.active { background: var(--amber-glow); border-color: var(--amber); color: var(--amber); }
-
-.sp-version {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  font-size: 11px;
-  margin-top: auto;
-}
+/* ── 列表與主畫面樣式 ──────────────────────────────────────────────────────── */
 
 /* ── 狀態列 ──────────────────────────────────────────────────────────────── */
 .status-bar {
@@ -730,28 +603,6 @@ function crumbLabel(crumb: string, idx: number): string {
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
-
-/* ── 錯誤 Toast ──────────────────────────────────────────────────────────── */
-.error-toast {
-  position: fixed; bottom: 36px; left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-2); border: 1px solid var(--red);
-  border-radius: 6px; padding: 12px 16px;
-  display: flex; align-items: flex-start; gap: 12px;
-  font-size: 12px; box-shadow: var(--shadow-card); z-index: 200;
-  max-width: min(600px, 90vw);
-}
-.error-content {
-  display: flex; gap: 8px; align-items: flex-start; flex: 1; min-width: 0;
-}
-.error-msg {
-  word-break: break-all;
-  white-space: pre-wrap;
-  line-height: 1.5;
-  color: var(--text-1);
-}
-.error-actions { display: flex; gap: 4px; flex-shrink: 0; }
-
 
 /* ── Transitions ──────────────────────────────────────────────────────────── */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.2s, transform 0.2s; }

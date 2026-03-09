@@ -273,16 +273,31 @@ const virtualizer = useVirtualizer(
 
 const selected = ref(new Set<string>());
 
-// 自動清理已不存在的項目
+// 自動清理已不存在的項目 (防抖優化, 避免大量資料頻繁清理導致卡頓)
+let cleanupTimer: number | null = null;
 watch(() => props.entries, (newEntries) => {
-  const currentPaths = new Set(newEntries.map(e => e.path));
-  const nextSelected = new Set<string>();
-  for (const p of selected.value) {
-    if (currentPaths.has(p)) nextSelected.add(p);
-  }
-  if (nextSelected.size !== selected.value.size) {
-    selected.value = nextSelected;
-  }
+  if (selected.value.size === 0) return;
+
+  if (cleanupTimer) clearTimeout(cleanupTimer);
+  cleanupTimer = setTimeout(() => {
+    // 延遲清理以減少大目錄更新時的 CPU 開銷
+    const nextSelected = new Set<string>();
+    // 當前顯示中的有效路徑
+    const currentPaths = new Set(newEntries.map(e => e.path));
+    let changed = false;
+
+    for (const p of selected.value) {
+      if (currentPaths.has(p)) {
+        nextSelected.add(p);
+      } else {
+        changed = true;
+      }
+    }
+    
+    if (changed) {
+      selected.value = nextSelected;
+    }
+  }, 150) as unknown as number;
 });
 
 /** Toggle single item selection */
@@ -304,18 +319,27 @@ function toggleAll() {
 
 const isAllSelected = computed(() =>
   sortedEntries.value.length > 0 &&
-  sortedEntries.value.every(e => selected.value.has(e.path))
+  selected.value.size === sortedEntries.value.length // O(1) 優化
 );
 
 const isIndeterminate = computed(() =>
   selected.value.size > 0 && !isAllSelected.value
 );
 
-const selectedSize = computed(() =>
-  props.entries
-    .filter((e) => selected.value.has(e.path))
-    .reduce((s, e) => s + e.size, 0)
-);
+const selectedSize = computed(() => {
+  if (selected.value.size === 0) return 0;
+  // 優化：只對已選取的項目做疊加，減少完全走訪整包 entries 陣列的次數
+  let total = 0;
+  // 建立快速查詢辭典
+  const entryMap = new Map();
+  for (let i = 0; i < props.entries.length; i++) {
+    const e = props.entries[i];
+    if (selected.value.has(e.path)) {
+      total += e.size;
+    }
+  }
+  return total;
+});
 
 // ── Delete confirmation ───────────────────────────────────────────────────────
 
