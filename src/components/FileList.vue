@@ -57,65 +57,86 @@
       <span class="dim mono">{{ props.i18n?.noItems ?? '[ empty directory ]' }}</span>
     </div>
 
-    <!-- File rows -->
+    <!-- File rows: Virtualized -->
     <template v-else>
-      <div
-        v-for="entry in sortedEntries"
-        :key="entry.path"
-        class="fl-row"
-        :class="{ selected: selected.has(entry.path) }"
-        @dblclick="entry.is_dir && $emit('navigate', entry.path)"
+      <div 
+        ref="parentRef"
+        class="virtual-container"
       >
-        <!-- Checkbox -->
-        <div class="col-check" @click.stop>
-          <input
-            type="checkbox"
-            class="row-checkbox"
-            :checked="selected.has(entry.path)"
-            @change="toggleSelect(entry)"
-          />
-        </div>
+        <div 
+          :style="{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: '100%',
+            position: 'relative',
+          }"
+        >
+          <div
+            v-for="virtualRow in virtualizer.getVirtualItems()"
+            :key="String(virtualRow.key)"
+            class="fl-row"
+            :class="{ selected: selected.has(sortedEntries[virtualRow.index].path) }"
+            :style="{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: `${virtualRow.size}px`,
+              transform: `translateY(${virtualRow.start}px)`,
+            }"
+            @dblclick="sortedEntries[virtualRow.index].is_dir && $emit('navigate', sortedEntries[virtualRow.index].path)"
+          >
+            <!-- Checkbox -->
+            <div class="col-check" @click.stop>
+              <input
+                type="checkbox"
+                class="row-checkbox"
+                :checked="selected.has(sortedEntries[virtualRow.index].path)"
+                @change="toggleSelect(sortedEntries[virtualRow.index])"
+              />
+            </div>
 
-        <div class="col-icon">
-          <span class="icon">{{ entry.is_dir ? "📁" : fileIcon(entry.name) }}</span>
-        </div>
+            <div class="col-icon">
+              <span class="icon">{{ sortedEntries[virtualRow.index].is_dir ? "📁" : fileIcon(sortedEntries[virtualRow.index].name) }}</span>
+            </div>
 
-        <div class="col-name">
-          <span
-            class="entry-name"
-            :class="{ 'dir-name': entry.is_dir }"
-            @click.stop="entry.is_dir && $emit('navigate', entry.path)"
-          >{{ entry.name }}</span>
-        </div>
+            <div class="col-name">
+              <span
+                class="entry-name"
+                :class="{ 'dir-name': sortedEntries[virtualRow.index].is_dir }"
+                @click.stop="sortedEntries[virtualRow.index].is_dir && $emit('navigate', sortedEntries[virtualRow.index].path)"
+              >{{ sortedEntries[virtualRow.index].name }}</span>
+            </div>
 
-        <div class="col-size mono">
-          <span v-if="entry.is_computing" class="computing-skel" />
-          <span v-else :class="sizeClass(entry.size)">{{ formatBytes(entry.size) }}</span>
-        </div>
+            <div class="col-size mono">
+              <span v-if="sortedEntries[virtualRow.index].is_computing" class="computing-skel" />
+              <span v-else :class="sizeClass(sortedEntries[virtualRow.index].size)">{{ formatBytes(sortedEntries[virtualRow.index].size) }}</span>
+            </div>
 
-        <div class="col-files mono dim">{{ entry.file_count.toLocaleString() }}</div>
+            <div class="col-files mono dim">{{ sortedEntries[virtualRow.index].file_count.toLocaleString() }}</div>
 
-        <div class="col-modified dim mono" style="font-size:11px">
-          {{ formatDate(entry.modified) }}
-        </div>
+            <div class="col-modified dim mono" style="font-size:11px">
+              {{ formatDate(sortedEntries[virtualRow.index].modified) }}
+            </div>
 
-        <!-- Proportional size bar -->
-        <div class="col-bar">
-          <div class="size-bar-track">
-            <div
-              class="size-bar-fill"
-              :style="{
-                width: barWidth(entry.size) + '%',
-                background: barColor(entry.size),
-              }"
-            />
+            <!-- Proportional size bar -->
+            <div class="col-bar">
+              <div class="size-bar-track">
+                <div
+                  class="size-bar-fill"
+                  :style="{
+                    width: barWidth(sortedEntries[virtualRow.index].size) + '%',
+                    background: barColor(sortedEntries[virtualRow.index].size),
+                  }"
+                />
+              </div>
+            </div>
+
+            <!-- Action buttons (appear on hover) -->
+            <div class="col-actions" @click.stop>
+              <button class="btn-icon" :title="props.i18n?.trashAction ?? 'Trash'" @click="$emit('trash', sortedEntries[virtualRow.index].path)">🗑</button>
+              <button class="btn-icon btn-icon-danger" :title="props.i18n?.deleteAction ?? 'Delete'" @click="confirmDelete(sortedEntries[virtualRow.index])">✕</button>
+            </div>
           </div>
-        </div>
-
-        <!-- Action buttons (appear on hover) -->
-        <div class="col-actions" @click.stop>
-          <button class="btn-icon" :title="props.i18n?.trashAction ?? 'Trash'" @click="$emit('trash', entry.path)">🗑</button>
-          <button class="btn-icon btn-icon-danger" :title="props.i18n?.deleteAction ?? 'Delete'" @click="confirmDelete(entry)">✕</button>
         </div>
       </div>
     </template>
@@ -158,6 +179,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
+import { useVirtualizer } from '@tanstack/vue-virtual';
 import type { FileEntry } from "../composables/useScanner";
 import { formatBytes, formatDate } from "../composables/useScanner";
 
@@ -234,6 +256,18 @@ const sortedEntries = computed(() => {
     }
   });
 });
+
+// ── 虛擬捲動 (Virtual Scrolling) ──────────────────────────────────────────────────
+const parentRef = ref<HTMLElement | null>(null);
+
+const virtualizer = useVirtualizer(
+  computed(() => ({
+    count: sortedEntries.value.length,
+    getScrollElement: () => parentRef.value,
+    estimateSize: () => 35, // .fl-row 的高度 (約35px)
+    overscan: 10,
+  }))
+);
 
 // ── Selection ─────────────────────────────────────────────────────────────────
 
@@ -364,10 +398,16 @@ function fileIcon(name: string): string {
 
 
 /* ── Row ────────────────────────────────────────────────────────────────── */
+.virtual-container {
+  height: calc(100vh - 120px);
+  overflow-y: auto;
+  contain: strict;
+}
+
 .fl-row {
   display: grid;
   grid-template-columns: var(--col-widths);
-  padding: 5px 12px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--border);
   align-items: center;
   cursor: default;
